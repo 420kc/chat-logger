@@ -13,8 +13,6 @@ repositories {
 def runeLiteVersion = 'latest.release'
 
 dependencies {
-    implementation group: 'net.jodah', name: 'failsafe', version: '2.4.0'
-
     compileOnly group: 'net.runelite', name: 'client', version: runeLiteVersion
 
     compileOnly 'org.projectlombok:lombok:1.18.4'
