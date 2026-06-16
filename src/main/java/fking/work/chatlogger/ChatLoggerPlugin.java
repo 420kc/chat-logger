@@ -25,9 +25,10 @@ import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.util.Text;
 import okhttp3.OkHttpClient;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Slf4j
-@PluginDescriptor(name = "Chat Logger", description = "Logs chat messages to a file")
+@PluginDescriptor(name = "Hive Chat Logger", description = "Logs chat messages to a file and submits them to Hive")
 public class ChatLoggerPlugin extends Plugin {
 
     private static final String BASE_DIRECTORY = RuneLite.RUNELITE_DIR + "/chatlogs/";
@@ -46,6 +47,7 @@ public class ChatLoggerPlugin extends Plugin {
     private Gson gson;
 
     private RemoteSubmitter remoteSubmitter;
+    private final AtomicLong localMessageIds = new AtomicLong(System.currentTimeMillis());
     private Logger publicChatLogger;
     private Logger privateChatLogger;
     private Logger friendsChatLogger;
@@ -106,16 +108,32 @@ public class ChatLoggerPlugin extends Plugin {
     }
 
     private void startRemoteSubmitter() {
-        if (config.remoteSubmitLogFriendsChat() || config.remoteSubmitLogClanChat()) {
-
-            if (remoteSubmitter != null) {
-                log.debug("Shutting down previous remoteSubmitter...");
-                shutdownRemoteSubmitter();
-            }
-            log.debug("Starting a new remoteSubmitter...");
-            remoteSubmitter = RemoteSubmitter.create(config, httpClient, gson);
-            remoteSubmitter.initialize();
+        if (!remoteSubmissionEnabled() || !remoteEndpointConfigured()) {
+            shutdownRemoteSubmitter();
+            return;
         }
+
+        if (remoteSubmitter != null) {
+            return;
+        }
+
+        log.debug("Starting a new remoteSubmitter...");
+        remoteSubmitter = RemoteSubmitter.create(config, httpClient, gson);
+        remoteSubmitter.initialize();
+    }
+
+    private boolean remoteSubmissionEnabled() {
+        return config.remoteSubmitLogFriendsChat()
+            || config.remoteSubmitLogClanChat()
+            || config.remoteSubmitLogGroupChat()
+            || config.remoteSubmitLogPrivateChat()
+            || config.remoteSubmitLogPublicChat()
+            || config.remoteSubmitLogGameChat();
+    }
+
+    private boolean remoteEndpointConfigured() {
+        String endpoint = config.remoteEndpoint();
+        return endpoint != null && !endpoint.trim().isEmpty();
     }
 
     private void shutdownRemoteSubmitter() {
@@ -183,8 +201,9 @@ public class ChatLoggerPlugin extends Plugin {
                 }
                 
                 if (config.remoteSubmitLogGroupChat() && remoteSubmitter != null) {
-                    submitToRemote("groupiron", event, CHANNEL_UNRANKED);
+                    submitToRemote("groupiron", ChatType.GROUP, event, CHANNEL_UNRANKED);
                 }
+                break;
 
             case FRIENDSCHAT:
                 if (config.logFriendsChat()) {
@@ -198,7 +217,7 @@ public class ChatLoggerPlugin extends Plugin {
                         return;
                     }
                     String owner = friendsChatManager.getOwner();
-                    submitToRemote(owner, event, friendsChatMemberRank(event.getName()));
+                    submitToRemote(owner, ChatType.FRIENDS, event, friendsChatMemberRank(event.getName()));
                 }
                 break;
 
@@ -207,6 +226,9 @@ public class ChatLoggerPlugin extends Plugin {
                     gameChatLogger.info(event.getMessage());
                 }
 
+                if (config.remoteSubmitLogGameChat() && remoteSubmitter != null) {
+                    submitToRemote("game", ChatType.GAME, event, CHANNEL_UNRANKED);
+                }
                 break;
             case CLAN_CHAT:
             case CLAN_GUEST_CHAT:
@@ -226,7 +248,7 @@ public class ChatLoggerPlugin extends Plugin {
                         return;
                     }
                     String chatName = clanChannel.getName();
-                    submitToRemote(chatName, event, clanChannelMemberRank(event.getName(), chatName));
+                    submitToRemote(chatName, ChatType.CLAN, event, clanChannelMemberRank(event.getName(), chatName));
                 }
                 break;
             case PRIVATECHAT:
@@ -236,19 +258,41 @@ public class ChatLoggerPlugin extends Plugin {
                     String predicate = event.getType() == ChatMessageType.PRIVATECHATOUT ? "To" : "From";
                     privateChatLogger.info("{} {}: {}", predicate, event.getName(), event.getMessage());
                 }
+
+                if (config.remoteSubmitLogPrivateChat() && remoteSubmitter != null) {
+                    submitToRemote("private", ChatType.PRIVATE, event, CHANNEL_UNRANKED);
+                }
                 break;
             case MODCHAT:
             case PUBLICCHAT:
                 if (config.logPublicChat()) {
                     publicChatLogger.info("{}: {}", event.getName(), event.getMessage());
                 }
+
+                if (config.remoteSubmitLogPublicChat() && remoteSubmitter != null) {
+                    submitToRemote("public", ChatType.PUBLIC, event, CHANNEL_UNRANKED);
+                }
                 break;
         }
     }
 
-    private void submitToRemote(String channelName, ChatMessage event, int rank) {
-        long messageId = CrossWorldMessages.latestId(client);
-        remoteSubmitter.queue(ChatEntry.from(messageId, ChatType.CLAN, channelName, rank, event));
+    private void submitToRemote(String channelName, ChatType chatType, ChatMessage event, int rank) {
+        long messageId = messageIdFor(chatType);
+        remoteSubmitter.queue(ChatEntry.from(messageId, chatType, channelName, rank, event));
+    }
+
+    private long messageIdFor(ChatType chatType) {
+        if (chatType == ChatType.CLAN || chatType == ChatType.FRIENDS || chatType == ChatType.GROUP) {
+            try {
+                long id = CrossWorldMessages.latestId(client);
+                if (id != 0) {
+                    return id;
+                }
+            } catch (RuntimeException ex) {
+                log.debug("Could not read cross-world message id", ex);
+            }
+        }
+        return localMessageIds.incrementAndGet();
     }
 
     private Logger setupLogger(String loggerName, String subFolder) {

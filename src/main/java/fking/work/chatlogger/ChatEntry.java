@@ -17,8 +17,9 @@ public class ChatEntry {
     private final String sender;
     private final int rank;
     private final String message;
+    private final String messageType;
 
-    private ChatEntry(long id, ChatType chatType, String chatName, String sender, int rank, String message) {
+    private ChatEntry(long id, ChatType chatType, String chatName, String sender, int rank, String message, String messageType) {
         this.id = id;
         this.chatType = chatType;
         this.timestamp = ZonedDateTime.now(Clock.systemUTC());
@@ -26,15 +27,22 @@ public class ChatEntry {
         this.sender = sender;
         this.rank = rank;
         this.message = message;
+        this.messageType = messageType;
     }
 
     public static ChatEntry from(long messageId, ChatType chatType, String chatName, int rank, ChatMessage chatMessage) {
-        String sender = chatMessage.getName().isEmpty() ? chatName : Text.removeFormattingTags(chatMessage.getName());
-        return new ChatEntry(messageId, chatType, Text.standardize(chatName), sender, rank, chatMessage.getMessage());
+        String name = chatMessage.getName();
+        String sender = name == null || name.isEmpty() ? chatName : Text.removeFormattingTags(name);
+        String messageType = chatMessage.getType() == null ? "" : chatMessage.getType().name();
+        return new ChatEntry(messageId, chatType, Text.standardize(chatName), sender, rank, chatMessage.getMessage(), messageType);
     }
 
     public enum ChatType {
         FRIENDS,
-        CLAN
+        CLAN,
+        GROUP,
+        PRIVATE,
+        PUBLIC,
+        GAME
     }
 }

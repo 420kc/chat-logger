@@ -151,6 +151,36 @@ public interface ChatLoggerConfig extends Config {
 
     @ConfigItem(
         section = REMOTE_SECT,
+        keyName = "remotelogprivate",
+        name = "Remote Private Chat",
+        description = "Enables remote submission of private chat"
+    )
+    default boolean remoteSubmitLogPrivateChat() {
+        return false;
+    }
+
+    @ConfigItem(
+        section = REMOTE_SECT,
+        keyName = "remotelogpublic",
+        name = "Remote Public Chat",
+        description = "Enables remote submission of public chat"
+    )
+    default boolean remoteSubmitLogPublicChat() {
+        return false;
+    }
+
+    @ConfigItem(
+        section = REMOTE_SECT,
+        keyName = "remoteloggame",
+        name = "Remote Game Chat",
+        description = "Enables remote submission of game chat"
+    )
+    default boolean remoteSubmitLogGameChat() {
+        return false;
+    }
+
+    @ConfigItem(
+        section = REMOTE_SECT,
         keyName = "remoteendpoint",
         name = "Endpoint",
         description = "The endpoint that messages will be submitted to"
