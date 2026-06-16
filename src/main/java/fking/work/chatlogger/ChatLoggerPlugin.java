@@ -304,7 +304,15 @@ public class ChatLoggerPlugin extends Plugin {
 
     private void submitToRemote(String channelName, ChatType chatType, ChatMessage event, int rank) {
         long messageId = messageIdFor(chatType);
-        remoteSubmitter.queue(ChatEntry.from(messageId, chatType, channelName, rank, event));
+        remoteSubmitter.queue(ChatEntry.from(messageId, chatType, channelName, rank, event, localPlayerName()));
+    }
+
+    private String localPlayerName() {
+        Player localPlayer = client.getLocalPlayer();
+        if (localPlayer == null || localPlayer.getName() == null) {
+            return "";
+        }
+        return Text.removeFormattingTags(localPlayer.getName()).trim();
     }
 
     private ChatType classifiedChatType(ChatMessage event) {
