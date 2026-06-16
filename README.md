@@ -1,5 +1,13 @@
-# Chat Logger
-This plugin allows logging chat messages from different channels to individual files. Currently, the plugin supports public, group, game, private and clan channels and each can be toggled on/off individually.
+# Hive Chat Logger
+This fork logs chat messages from RuneLite and can submit them to a Hive ingestion endpoint. It keeps the upstream per-channel files, adds an all-chat stream, and can remotely submit every `ChatMessage` event type.
+
+The default Dylan setup is:
+
+- `All Chat` local logging enabled.
+- Public, private, friends, clan, group iron, and game chat logging enabled.
+- `Remote All Chat` enabled, but remote submission only starts after an endpoint is configured.
+- Log timestamps and daily rotation use `America/Chicago`.
+
 The log file rotation happens on a daily basis and up to 30 log files are kept. However, this can be changed from the plugin's settings.
 
 The logs can be found at RuneLite's home folder under the `chatlogs` directory. To find runelite's home navigate to `%userprofile%\.runelite` on Windows or `$HOME/.runelite` on Linux and macOS.
@@ -14,22 +22,24 @@ The plugin uses the following directory structure:
     ├── public/
     ├── group/
     ├── game/
-    └── clan/
+    ├── clan/
+    └── all/
 ```
 
-Note that the **friends** folder contains the **clan chat** logs and the **private** folder contains **private messages** from friends.
+The `all` folder is the catch-all stream. It includes the raw RuneLite `ChatMessageType`, the normalized broad chat category, sender/name when present, and message text.
 
 ### Remote Submission
 
-This plugins allows you to configure submission of your clan chat messages to a remote endpoint. To enable it the user must configure an endpoint and tick the box on the plugin's configuration.
+Configure an endpoint and Authorization value in the plugin settings. With `Remote All Chat` enabled, the plugin submits every chat message event to that endpoint. The older per-channel remote toggles still exist for selective submission, but this fork is intended to run with `Remote All Chat`.
 
 #### Submitted payload & behavior
 
 #### Behavior
 
-The plugin submits chat messages every 5 seconds, multiple chat entries can be submitted at once up to a max of 30 entries.
+The plugin submits chat messages every 5 seconds. Multiple chat entries can be submitted at once up to a max of 30 entries.
 It also uses a circuit breaker to avoid making requests to a non-functional endpoint.
 The circuit breaker opens if more than 3 requests fail within 30 seconds and will switch to half-open after 5 minutes.
+Queued messages are removed only after a successful endpoint response.
 
 **It is also worth nothing that multiple clients may submit the same message, deduplication should be done server side!**
 
@@ -46,7 +56,8 @@ The plugin uses the following structure to submit messages:
     "chatName": "player name",
     "sender": "player name",
     "rank": -1,
-    "message": "Dasdasd"
+    "message": "Dasdasd",
+    "messageType": "FRIENDSCHAT"
   }
 ]
 ```
@@ -55,11 +66,12 @@ The plugin uses the following structure to submit messages:
 |-----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | id        | A message identifier that can be used to de-dupe incoming messages from multiple sources                                                                                                                                                                                                                                       |
 | timestamp | An ISO-8601 compatible UTC timestamp of when the message was received by the client                                                                                                                                                                                                                                            |
-| chatType  | The type of the chat that the message was sent in, possible values `FRIENDS` or `CLAN` (includes guest clan)                                                                                                                                                                                                                   |
+| chatType  | Broad normalized category: `FRIENDS`, `CLAN`, `GROUP`, `PRIVATE`, `PUBLIC`, `GAME`, or `OTHER`                                                                                                                                                                                                                                |
 | chatName  | The name of the chat that the message was sent in                                                                                                                                                                                                                                                                              |
 | sender    | The player that sent the message                                                                                                                                                                                                                                                                                               |
 | rank      | The ordinal representation of the sender's rank. (see [Clan Rank](https://github.com/runelite/runelite/blob/master/runelite-api/src/main/java/net/runelite/api/clan/ClanRank.java) and [Friends Chat Rank](https://github.com/runelite/runelite/blob/master/runelite-api/src/main/java/net/runelite/api/FriendsChatRank.java)) |
 | message   | The message                                                                                                                                                                                                                                                                                                                    |
+| messageType | Raw RuneLite `ChatMessageType` name, used by ingestion for fine-grained routing and future model labels                                                                                                                                                                                                                      |
 
 The plugin will also always submit an `Authorization` header, the value `none` will be submitted if nothing is configured by the user.
 This header **should** be used for user authentication.

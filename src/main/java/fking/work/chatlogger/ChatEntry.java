@@ -32,9 +32,11 @@ public class ChatEntry {
 
     public static ChatEntry from(long messageId, ChatType chatType, String chatName, int rank, ChatMessage chatMessage) {
         String name = chatMessage.getName();
-        String sender = name == null || name.isEmpty() ? chatName : Text.removeFormattingTags(name);
+        String fallbackName = chatName == null || chatName.trim().isEmpty() ? chatType.name().toLowerCase() : chatName;
+        String sender = name == null || name.isEmpty() ? fallbackName : Text.removeFormattingTags(name);
         String messageType = chatMessage.getType() == null ? "" : chatMessage.getType().name();
-        return new ChatEntry(messageId, chatType, Text.standardize(chatName), sender, rank, chatMessage.getMessage(), messageType);
+        String message = chatMessage.getMessage() == null ? "" : chatMessage.getMessage();
+        return new ChatEntry(messageId, chatType, Text.standardize(fallbackName), sender, rank, message, messageType);
     }
 
     public enum ChatType {
@@ -43,6 +45,7 @@ public class ChatEntry {
         GROUP,
         PRIVATE,
         PUBLIC,
-        GAME
+        GAME,
+        OTHER
     }
 }

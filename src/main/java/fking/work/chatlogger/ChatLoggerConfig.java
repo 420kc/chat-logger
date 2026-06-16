@@ -36,13 +36,23 @@ public interface ChatLoggerConfig extends Config {
 
     // Channel Select
     @ConfigItem(
+        section = CHANNEL_SECT,
+        keyName = "all",
+        name = "All Chat",
+        description = "Logs every chat message event to one all-chat file"
+    )
+    default boolean logAllChat() {
+        return true;
+    }
+
+    @ConfigItem(
         section = CHANNEL_SECT, 
         keyName = "game", 
         name = "Game Chat", 
         description = "Enable game chat logging"
     )
     default boolean logGameChat() {
-        return false;
+        return true;
     }
 
     @ConfigItem(
@@ -52,7 +62,7 @@ public interface ChatLoggerConfig extends Config {
         description = "Enables logging of the public chat"
     )
     default boolean logPublicChat() {
-        return false;
+        return true;
     }
 
     @ConfigItem(
@@ -119,6 +129,16 @@ public interface ChatLoggerConfig extends Config {
     }
 
     // Remote Submission
+    @ConfigItem(
+        section = REMOTE_SECT,
+        keyName = "remotelogall",
+        name = "Remote All Chat",
+        description = "Submits every chat message event to the configured endpoint"
+    )
+    default boolean remoteSubmitLogAllChat() {
+        return true;
+    }
+
     @ConfigItem(
             keyName = "remotelogfriends",
             name = "Remote Friends Chat (Channel Chat)",

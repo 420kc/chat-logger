@@ -48,6 +48,7 @@ public class ChatLoggerPlugin extends Plugin {
 
     private RemoteSubmitter remoteSubmitter;
     private final AtomicLong localMessageIds = new AtomicLong(System.currentTimeMillis());
+    private Logger allChatLogger;
     private Logger publicChatLogger;
     private Logger privateChatLogger;
     private Logger friendsChatLogger;
@@ -99,6 +100,7 @@ public class ChatLoggerPlugin extends Plugin {
     }
 
     private void initLoggers() {
+        allChatLogger = setupLogger("AllChatLogger", "all");
         publicChatLogger = setupLogger("PublicChatLogger", "public");
         privateChatLogger = setupLogger("PrivateChatLogger", "private");
         friendsChatLogger = setupLogger("FriendsChatLogger", "friends");
@@ -123,7 +125,8 @@ public class ChatLoggerPlugin extends Plugin {
     }
 
     private boolean remoteSubmissionEnabled() {
-        return config.remoteSubmitLogFriendsChat()
+        return config.remoteSubmitLogAllChat()
+            || config.remoteSubmitLogFriendsChat()
             || config.remoteSubmitLogClanChat()
             || config.remoteSubmitLogGroupChat()
             || config.remoteSubmitLogPrivateChat()
@@ -144,6 +147,10 @@ public class ChatLoggerPlugin extends Plugin {
     }
 
     private int friendsChatMemberRank(String name) {
+        if (name == null || name.trim().isEmpty()) {
+            return CHANNEL_UNRANKED;
+        }
+
         FriendsChatManager friendsChatManager = client.getFriendsChatManager();
         if (friendsChatManager != null) {
             FriendsChatMember member = friendsChatManager.findByName(Text.removeTags(name));
@@ -153,6 +160,10 @@ public class ChatLoggerPlugin extends Plugin {
     }
 
     private int clanChannelMemberRank(String name, String clanName) {
+        if (name == null || name.trim().isEmpty()) {
+            return CHANNEL_UNRANKED;
+        }
+
         String cleanName = Text.removeTags(name);
         ClanChannel clanChannel = client.getClanChannel();
 
@@ -187,12 +198,24 @@ public class ChatLoggerPlugin extends Plugin {
 
     @Subscribe
     public void onChatMessage(ChatMessage event) {
+        if (config.logAllChat() && allChatLogger != null) {
+            allChatLogger.info("{} [{}] {}: {}", chatTypeName(event), classifiedChatType(event), cleanName(event), safeMessage(event));
+        }
+
+        boolean remoteAll = config.remoteSubmitLogAllChat();
+        if (event.getType() == null) {
+            if (shouldSubmit(remoteAll, false)) {
+                submitToRemote("UNKNOWN", ChatType.OTHER, event, CHANNEL_UNRANKED);
+            }
+            return;
+        }
+
         switch (event.getType()) {
             case CLAN_GIM_CHAT:
             case CLAN_GIM_MESSAGE:
             case CLAN_GIM_FORM_GROUP:
             case CLAN_GIM_GROUP_WITH:
-                if (config.logGroupChat()) {
+                if (config.logGroupChat() && groupChatLogger != null) {
                     if (event.getType() == ChatMessageType.CLAN_GIM_MESSAGE) {
                         groupChatLogger.info("{}", event.getMessage());
                     } else {
@@ -200,40 +223,38 @@ public class ChatLoggerPlugin extends Plugin {
                     }
                 }
                 
-                if (config.remoteSubmitLogGroupChat() && remoteSubmitter != null) {
+                if (shouldSubmit(remoteAll, config.remoteSubmitLogGroupChat())) {
                     submitToRemote("groupiron", ChatType.GROUP, event, CHANNEL_UNRANKED);
                 }
                 break;
 
             case FRIENDSCHAT:
-                if (config.logFriendsChat()) {
-                    friendsChatLogger.info("[{}] {}: {}", event.getSender(), event.getName(), event.getMessage());
+                if (config.logFriendsChat() && friendsChatLogger != null) {
+                    friendsChatLogger.info("[{}] {}: {}", safeText(event.getSender()), cleanName(event), safeMessage(event));
                 }
 
-                if (config.remoteSubmitLogFriendsChat() && remoteSubmitter != null) {
+                if (shouldSubmit(remoteAll, config.remoteSubmitLogFriendsChat())) {
                     FriendsChatManager friendsChatManager = client.getFriendsChatManager();
-
-                    if (friendsChatManager == null) {
-                        return;
-                    }
-                    String owner = friendsChatManager.getOwner();
+                    String owner = friendsChatManager == null || friendsChatManager.getOwner() == null || friendsChatManager.getOwner().trim().isEmpty()
+                        ? "friends"
+                        : friendsChatManager.getOwner();
                     submitToRemote(owner, ChatType.FRIENDS, event, friendsChatMemberRank(event.getName()));
                 }
                 break;
 
             case GAMEMESSAGE:
-                if (config.logGameChat()) {
+                if (config.logGameChat() && gameChatLogger != null) {
                     gameChatLogger.info(event.getMessage());
                 }
 
-                if (config.remoteSubmitLogGameChat() && remoteSubmitter != null) {
+                if (shouldSubmit(remoteAll, config.remoteSubmitLogGameChat())) {
                     submitToRemote("game", ChatType.GAME, event, CHANNEL_UNRANKED);
                 }
                 break;
             case CLAN_CHAT:
             case CLAN_GUEST_CHAT:
             case CLAN_MESSAGE:
-                if (config.logClanChat()) {
+                if (config.logClanChat() && clanChatLogger != null) {
                     if (event.getType() == ChatMessageType.CLAN_MESSAGE) {
                         clanChatLogger.info("{}", event.getMessage());
                     } else {
@@ -241,44 +262,100 @@ public class ChatLoggerPlugin extends Plugin {
                     }
                 }
 
-                if (config.remoteSubmitLogClanChat() && remoteSubmitter != null) {
+                if (shouldSubmit(remoteAll, config.remoteSubmitLogClanChat())) {
                     ClanChannel clanChannel = event.getType() == ChatMessageType.CLAN_CHAT || event.getType() == ChatMessageType.CLAN_MESSAGE ? client.getClanChannel() : client.getGuestClanChannel();
-
-                    if (clanChannel == null) {
-                        return;
-                    }
-                    String chatName = clanChannel.getName();
+                    String chatName = clanChannel == null ? "clan" : clanChannel.getName();
                     submitToRemote(chatName, ChatType.CLAN, event, clanChannelMemberRank(event.getName(), chatName));
                 }
                 break;
             case PRIVATECHAT:
             case MODPRIVATECHAT:
             case PRIVATECHATOUT:
-                if (config.logPrivateChat()) {
+                if (config.logPrivateChat() && privateChatLogger != null) {
                     String predicate = event.getType() == ChatMessageType.PRIVATECHATOUT ? "To" : "From";
-                    privateChatLogger.info("{} {}: {}", predicate, event.getName(), event.getMessage());
+                    privateChatLogger.info("{} {}: {}", predicate, cleanName(event), safeMessage(event));
                 }
 
-                if (config.remoteSubmitLogPrivateChat() && remoteSubmitter != null) {
+                if (shouldSubmit(remoteAll, config.remoteSubmitLogPrivateChat())) {
                     submitToRemote("private", ChatType.PRIVATE, event, CHANNEL_UNRANKED);
                 }
                 break;
             case MODCHAT:
             case PUBLICCHAT:
-                if (config.logPublicChat()) {
-                    publicChatLogger.info("{}: {}", event.getName(), event.getMessage());
+                if (config.logPublicChat() && publicChatLogger != null) {
+                    publicChatLogger.info("{}: {}", cleanName(event), safeMessage(event));
                 }
 
-                if (config.remoteSubmitLogPublicChat() && remoteSubmitter != null) {
+                if (shouldSubmit(remoteAll, config.remoteSubmitLogPublicChat())) {
                     submitToRemote("public", ChatType.PUBLIC, event, CHANNEL_UNRANKED);
+                }
+                break;
+            default:
+                if (shouldSubmit(remoteAll, false)) {
+                    submitToRemote(chatTypeName(event), ChatType.OTHER, event, CHANNEL_UNRANKED);
                 }
                 break;
         }
     }
 
+    private boolean shouldSubmit(boolean remoteAll, boolean channelEnabled) {
+        return remoteSubmitter != null && (remoteAll || channelEnabled);
+    }
+
     private void submitToRemote(String channelName, ChatType chatType, ChatMessage event, int rank) {
         long messageId = messageIdFor(chatType);
         remoteSubmitter.queue(ChatEntry.from(messageId, chatType, channelName, rank, event));
+    }
+
+    private ChatType classifiedChatType(ChatMessage event) {
+        if (event.getType() == null) {
+            return ChatType.OTHER;
+        }
+
+        switch (event.getType()) {
+            case CLAN_GIM_CHAT:
+            case CLAN_GIM_MESSAGE:
+            case CLAN_GIM_FORM_GROUP:
+            case CLAN_GIM_GROUP_WITH:
+                return ChatType.GROUP;
+            case FRIENDSCHAT:
+                return ChatType.FRIENDS;
+            case GAMEMESSAGE:
+                return ChatType.GAME;
+            case CLAN_CHAT:
+            case CLAN_GUEST_CHAT:
+            case CLAN_MESSAGE:
+                return ChatType.CLAN;
+            case PRIVATECHAT:
+            case MODPRIVATECHAT:
+            case PRIVATECHATOUT:
+                return ChatType.PRIVATE;
+            case MODCHAT:
+            case PUBLICCHAT:
+                return ChatType.PUBLIC;
+            default:
+                return ChatType.OTHER;
+        }
+    }
+
+    private String chatTypeName(ChatMessage event) {
+        return event.getType() == null ? "UNKNOWN" : event.getType().name();
+    }
+
+    private String cleanName(ChatMessage event) {
+        String name = event.getName();
+        if (name == null || name.trim().isEmpty()) {
+            return "-";
+        }
+        return Text.removeFormattingTags(name);
+    }
+
+    private String safeMessage(ChatMessage event) {
+        return safeText(event.getMessage());
+    }
+
+    private String safeText(String value) {
+        return value == null ? "" : value;
     }
 
     private long messageIdFor(ChatType chatType) {
@@ -300,7 +377,7 @@ public class ChatLoggerPlugin extends Plugin {
 
         PatternLayoutEncoder encoder = new PatternLayoutEncoder();
         encoder.setContext(context);
-        encoder.setPattern("%d{HH:mm:ss} %msg%n");
+        encoder.setPattern("%d{HH:mm:ss z,America/Chicago} %msg%n");
         encoder.start();
 
         String directory = BASE_DIRECTORY;
@@ -320,7 +397,7 @@ public class ChatLoggerPlugin extends Plugin {
         TimeBasedRollingPolicy<ILoggingEvent> logFilePolicy = new TimeBasedRollingPolicy<>();
         logFilePolicy.setContext(context);
         logFilePolicy.setParent(appender);
-        logFilePolicy.setFileNamePattern(directory + "chatlog_%d{yyyy-MM-dd}.log");
+        logFilePolicy.setFileNamePattern(directory + "chatlog_%d{yyyy-MM-dd,America/Chicago}.log");
         logFilePolicy.setMaxHistory(config.archiveCount());
         logFilePolicy.start();
 

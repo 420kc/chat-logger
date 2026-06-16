@@ -74,7 +74,8 @@ public class RemoteSubmitter {
         if (queuedEntries.isEmpty()) {
             return;
         }
-        RequestBody payload = buildPayload();
+        List<ChatEntry> entries = nextBatch();
+        RequestBody payload = buildPayload(entries);
 
         try {
             Failsafe.with(BREAKER).run(() -> {
@@ -92,8 +93,10 @@ public class RemoteSubmitter {
                 try (Response response = okHttpClient.newCall(request).execute()) {
 
                     if (!response.isSuccessful()) {
-                        log.warn("Remote endpoint returned non successful response, responseCode={}", response.code());
+                        throw new IOException("Remote endpoint returned non successful response, responseCode=" + response.code());
                     }
+
+                    dropSubmitted(entries.size());
                 }
             });
         } catch (Exception e) {
@@ -103,14 +106,30 @@ public class RemoteSubmitter {
         }
     }
 
-    private RequestBody buildPayload() {
+    private List<ChatEntry> nextBatch() {
         List<ChatEntry> entries = new ArrayList<>();
         int count = 0;
 
-        while (!queuedEntries.isEmpty() && count < MAX_ENTRIES_PER_TICK) {
-            entries.add(queuedEntries.poll());
+        for (ChatEntry entry : queuedEntries) {
+            if (count >= MAX_ENTRIES_PER_TICK) {
+                break;
+            }
+            entries.add(entry);
             count++;
         }
+        return entries;
+    }
+
+    private void dropSubmitted(int size) {
+        int count = 0;
+
+        while (!queuedEntries.isEmpty() && count < size) {
+            queuedEntries.poll();
+            count++;
+        }
+    }
+
+    private RequestBody buildPayload(List<ChatEntry> entries) {
         return RequestBody.create(APPLICATION_JSON, gson.toJson(entries));
     }
 }
